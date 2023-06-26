@@ -1,0 +1,289 @@
+---
+- name: Set vm_vars fact
+  ansible.builtin.set_fact:
+    vm_vars: "{{ hostvars[inventory_hostname] }}"
+
+- name: Check if the vm is down
+  community.vmware.vmware_guest_info:
+    datacenter: "{{ vm_vars['vmware']['datacenter'] }}"
+    folder: "{{ vm_vars['vmware']['datacenter'] }}/vm/{{ vm_vars['vmware']['vm_folder'] }}"
+    name: "{{ vm_vars['hostname'] }}"
+    username: "{{ lookup('env', 'VMWARE_USER') }}"
+    password: "{{ lookup('env', 'VMWARE_PASSWORD') }}"
+    hostname: "{{ vm_vars['vcenter_server'] }}"
+    validate_certs: false
+  register: output_vmware
+  delegate_to: localhost
+  failed_when: false
+  changed_when: false
+  when:
+    - redeploy_instances is defined
+  tags:
+    - skip_ansible_lint
+
+- name: Fail if VM does not exsist
+  ansible.builtin.fail:
+    msg: "VM {{ inventory_hostname }} does not exist, please deploy first"
+  when:
+    - redeploy_instances is defined
+    - not override_vm_down | bool
+    - output_vmware.msg is defined
+    - "'non-existing VM' in output_vmware.msg"
+
+- name: Fail if VM not Down
+  ansible.builtin.fail:
+    msg: "VM {{ inventory_hostname }} is not down, please stop VM first"
+  when:
+    - redeploy_instances is defined
+    - not override_vm_down | bool
+    - "'poweredOn' in output_vmware.instance.hw_power_status"
+
+- name: Power off instances
+  community.vmware.vmware_guest:
+    datacenter: "{{ vm_vars['vmware']['datacenter'] }}"
+    folder: "{{ vm_vars['vmware']['datacenter'] }}/vm/{{ vm_vars['vmware']['vm_folder'] }}"
+    name: "{{ vm_vars['hostname'] }}"
+    state: poweredoff
+    username: "{{ lookup('env', 'VMWARE_USER') }}"
+    password: "{{ lookup('env', 'VMWARE_PASSWORD') }}"
+    hostname: "{{ vm_vars['vcenter_server'] }}"
+    validate_certs: false
+  delegate_to: localhost
+  when:
+    - redeploy_instances is defined
+    - redeploy_instances | bool
+    - output_vmware.instance is defined
+    - "'poweredOn' in output_vmware.instance.hw_power_status"
+
+- name: Remove instances when redeploy variable is set  # to be refined
+  community.vmware.vmware_guest:
+    cluster: "{{ vm_vars['vmware']['cluster'] }}"
+    datacenter: "{{ vm_vars['vmware']['datacenter'] }}"
+    # disk: "{{ disklist[instance] }}"
+    folder: "{{ vm_vars['vmware']['datacenter'] }}/vm/{{ vm_vars['vmware']['vm_folder'] }}"
+    name: "{{ vm_vars['hostname'] }}"
+    state: absent
+    validate_certs: false
+    username: "{{ lookup('env', 'VMWARE_USER') }}"
+    password: "{{ lookup('env', 'VMWARE_PASSWORD') }}"
+    hostname: "{{ vm_vars['vcenter_server'] }}"
+  delegate_to: localhost
+  when:
+    - redeploy_instances is defined
+    - redeploy_instances | bool
+    - output_vmware.msg is not defined
+
+# Create the network interface dictionary and add all the primary interfaces to it
+#
+# If this task is executed for a single instance with the following definition:
+#
+# instance:
+#
+# ...
+#   "hostname": "gdmpip240.gan.prorail.nl"
+#   "primary_interface": {
+#     "network": "frontend1",
+#     "ip": "10.95.6.240"
+#   },
+# ...
+#
+# location:
+#
+# ...
+#   "vmware": {
+#     "networks": {
+#       "frontend1": {
+#         "gateway": "10.95.6.1",
+#         "netmask": "255.255.255.0",
+#         "network": "10.95.6.0",
+#         "vmware_name": "PROD_GR (vlan767)"
+#       },
+#       "backend1": {
+#         "netmask": "255.255.255.0",
+#         "network": "10.95.7.0",
+#         "vmware_name": "CIC_Int_GR (vlan430)"
+#       }
+#     },
+#  ...
+#
+# will result in the interfaces variable with the following content:
+#
+# "interfaces": {
+#    "gdmpip240.gan.prorail.nl": [
+#       {
+#         "name": "PROD_GR (vlan767)",
+#         "ip": "10.95.6.246",
+#         "netmask": "255.255.255.0",
+#         "device_type": "vmxnet3",
+#         "type": "static",
+#         "gateway": "10.95.6.1"
+#       }
+#     ]
+#   }
+# }
+#
+- name: Create network interface dictionary, fill it with the primary interface
+  ansible.builtin.set_fact:
+    interfaces: "{{ interfaces | default({}) | combine({inventory_hostname: [{'ip':vm_vars['primary_interface']['ip'],
+      'gateway': vm_vars['vmware']['networks'][vm_vars['primary_interface']['network']]['gateway'],
+      'name': vm_vars['vmware']['networks'][vm_vars['primary_interface']['network']]['vmware_name'],
+      'netmask': vm_vars['vmware']['networks'][vm_vars['primary_interface']['network']]['netmask'],
+      'type': 'static' }]}) }}"
+
+#
+# Read the additional_interfaces key for the instance in vm_vars and when found run the add_interfaces role for this
+# instance (this role adds all the additional interfaces to the interfaces dictionary)
+#
+# Do this only when additional interfaces for the machine are defined.
+#
+- name: Add additional interfaces when defined
+  ansible.builtin.include_tasks:
+    file: add_interfaces.yml
+  when: vm_vars['additional_interfaces'] is defined
+
+#
+# Define the root disk size as the value of the key when root_disk_size is defined
+#
+- name: Set root disk size to the requested size when root_disk size is defined
+  ansible.builtin.set_fact:
+    root_disks: "{{ root_disks | default({}) | combine({inventory_hostname: {'size': vm_vars['root_disk_size']}}) }}"
+  when:
+    - vm_vars['root_disk_size'] is defined
+    - (vm_vars['root_disk_size'] | int > vm_vars['versions']['infrastructure_template_disk_size'] | int )
+#
+# Define the root disk size as {{ vm_vars['versions']['infrastructure_template_disk_size']|int }} for all instances that dont have root_disk_size set or lower then the default
+#
+- name: Set root disk size to {{ vm_vars['versions']['infrastructure_template_disk_size'] | int }} when root_disk_size isn't defined
+  ansible.builtin.set_fact:
+    ansible.builtin.root_disks: "{{ root_disks | default({}) | combine({inventory_hostname: {'size': vm_vars['versions']['infrastructure_template_disk_size'] | int }}) }}"
+  when: vm_vars['root_disk_size'] is not defined or (vm_vars['root_disk_size']|int <= vm_vars['versions']['infrastructure_template_disk_size'] | int )
+
+# Create the disk list dictionary with a list per instance. In this step this will be filled with the root disk only.
+#
+# The datastore name is sourced from the location definition
+#
+# If instance gdmpip240 has a root disk of 60GB the disklist dictionary will have the following content:
+#
+# "disklist": {
+#   "gdmpip240.gan.prorail.nl": [
+#     {
+#       "datastore": "UA_MER3_PROD",
+#       "size_gb": 60,
+#       "autoselect_datastore": "True"
+#     }
+#   ]
+# }
+- name: Create disks list, fill it with the VMs root disk
+  ansible.builtin.set_fact:
+    disklist: "{{ disklist | default({}) | combine( {inventory_hostname: [{'autoselect_datastore': true, 'datastore': vm_vars['vmware']['datastore_filter'], 'size_gb': root_disks[inventory_hostname]['size']}]} ) }}"
+
+      #
+# Read the disk key for the instance in vm_vars and when found run the add_disks role for this instance (this role adds
+# all the additional disks to the disklist dictionary, it will append the disks to the previously created list per instance)
+- name: Add additional disks to the list when defined
+  ansible.builtin.include_tasks:
+    file: add_disks.yml
+  when: vm_vars['disks'] is defined
+
+#
+# Create the VM's. Do this sequentially to prevent all new VM's being deployed in a single datastore. All the variables
+# are either sourced from the location group variables, the VM variables or the created disklist and interfaces variables
+# because the dict vm_vars[instance]['buildingblock']['name'] can be empty at the middle level (buildingblock) we first specify the buildingblock variable with a default value when it is empty
+# otherwise the lookup of name will fail. The default filter only works on the deepest level in your dict.
+#
+- name: Create VM(s)
+  vars:
+    buildingblock: "{{ vm_vars['buildingblock'] | default('not specified') }}"
+  community.vmware.vmware_guest:
+    annotation: |
+      Platform name = {{ vm_vars['meta']['platform']['name'] | default('not specified') }}
+      Platform contact = {{ vm_vars['meta']['platform']['contact'] | default('not specified') }}
+      OS = {{ vm_vars['os']['name'] | default('not specified') }}
+      Buildingblock = {{ buildingblock['name'] | default('not specified') }}
+      Environment = {{ vm_vars['env'] | default('not specified') }}
+    cluster: "{{ vm_vars['vmware']['cluster'] }}"
+    customization:
+      dns_servers: "{{ vm_vars['dns_servers'] }}"
+      domain: "{{ vm_vars['dns_domain'] }}"
+      hostname: "{{ vm_vars['hostname'].split('.')[0] }}"
+    datacenter: "{{ vm_vars['vmware']['datacenter'] }}"
+    disk: "{{ disklist[inventory_hostname] }}"
+    folder: "{{ vm_vars['vmware']['datacenter'] }}/vm/{{ vm_vars['vmware']['vm_folder'] }}"
+    hardware:
+      memory_mb: "{{ catalog[vm_vars['size']]['vm_memory_mb'] }}"
+      num_cpus: "{{ catalog[vm_vars['size']]['vm_vcpus'] }}"
+      scsi: paravirtual
+      hotadd_cpu: true
+      hotadd_memory: true
+    name: "{{ vm_vars['hostname'] }}"
+    networks: "{{ interfaces[inventory_hostname] }}"
+    state: present
+    template: "{{ vm_vars['vmware']['source_template'] }}"
+    validate_certs: false
+    wait_for_ip_address: false
+    wait_for_customization: true
+    username: "{{ lookup('env', 'VMWARE_USER') }}"
+    password: "{{ lookup('env', 'VMWARE_PASSWORD') }}"
+    hostname: "{{ vm_vars['vcenter_server'] }}"
+  throttle: 1  # Task goes wrong if you don't do this one at a time
+  delay: 10  # Wait between each vm creation
+  delegate_to: localhost
+
+- name: Power on instances
+  community.vmware.vmware_guest:
+    datacenter: "{{ vm_vars['vmware']['datacenter'] }}"
+    folder: "{{ vm_vars['vmware']['datacenter'] }}/vm/{{ vm_vars['vmware']['vm_folder'] }}"
+    name: "{{ vm_vars['hostname'] }}"
+    state: poweredon
+    username: "{{ lookup('env', 'VMWARE_USER') }}"
+    password: "{{ lookup('env', 'VMWARE_PASSWORD') }}"
+    hostname: "{{ vm_vars['vcenter_server'] }}"
+    validate_certs: false
+  delegate_to: localhost
+
+- name: Check if VM is online with IP
+  block:
+
+    - name: Poll instance to verify it is online
+      ansible.builtin.wait_for:
+        delay: 5
+        host: "{{ vm_vars['primary_interface']['ip'] }}"
+        port: 22
+        state: started
+        timeout: 30
+      delegate_to: localhost
+
+  rescue:
+
+    - name: Power off instance
+      community.vmware.vmware_guest:
+        datacenter: "{{ vm_vars['vmware']['datacenter'] }}"
+        folder: "{{ vm_vars['vmware']['datacenter'] }}/vm/{{ vm_vars['vmware']['vm_folder'] }}"
+        name: "{{ vm_vars['hostname'] }}"
+        state: poweredoff
+        username: "{{ lookup('env', 'VMWARE_USER') }}"
+        password: "{{ lookup('env', 'VMWARE_PASSWORD') }}"
+        hostname: "{{ vm_vars['vcenter_server'] }}"
+        validate_certs: false
+      delegate_to: localhost
+
+    - name: Power on instance
+      community.vmware.vmware_guest:
+        datacenter: "{{ vm_vars['vmware']['datacenter'] }}"
+        folder: "{{ vm_vars['vmware']['datacenter'] }}/vm/{{ vm_vars['vmware']['vm_folder'] }}"
+        name: "{{ vm_vars['hostname'] }}"
+        state: poweredon
+        username: "{{ lookup('env', 'VMWARE_USER') }}"
+        password: "{{ lookup('env', 'VMWARE_PASSWORD') }}"
+        hostname: "{{ vm_vars['vcenter_server'] }}"
+        validate_certs: false
+      delegate_to: localhost
+
+    - name: Poll after reboot
+      ansible.builtin.wait_for:
+        delay: 5
+        host: "{{ vm_vars['primary_interface']['ip'] }}"
+        port: 22
+        state: started
+        timeout: 60
+      delegate_to: localhost

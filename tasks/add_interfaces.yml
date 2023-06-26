@@ -1,0 +1,45 @@
+---
+#
+# Add all additional interfaces to the interfaces dictionary
+#
+# If we continue with the gdmpip240 example from the main main.yml file which has the following additional_interfaces definition:
+#
+# "additional_interfaces": [
+#   {
+#     "network": "backend1",
+#     "ip": "10.95.7.240"
+#   }
+# ]
+#
+# The resulting interfaces variable will become:
+#
+# "gdmpip240.gan.prorail.nl": [
+#   {
+#     "name": "PROD_GR (vlan767)",
+#     "ip": "10.95.6.240",
+#     "netmask": "255.255.255.0",
+#     "device_type": "vmxnet3",
+#     "type": "static",
+#     "gateway": "10.95.6.1"
+#   },
+#   {
+#     "ip": "10.95.7.240",
+#     "netmask": "255.255.255.0",
+#     "type": "static",
+#     "name": "CIC_Int_GR (vlan430)",
+#     "device_type": "vmxnet3"
+#   }
+# ],
+#
+# Please note that only the first interface has a defined gateway.
+#
+- name: Add additional interfaces when defined
+  loop_control:
+    loop_var: single_interface
+  ansible.builtin.set_fact:
+    interfaces: "{{ interfaces | combine({inventory_hostname: interfaces[inventory_hostname] + [{'ip': single_interface.ip,
+      'name': vm_vars['vmware']['networks'][single_interface.network]['vmware_name'],
+      'netmask': vm_vars['vmware']['networks'][single_interface.network]['netmask'],
+      'type': 'static' }]}) }}"
+  when: vm_vars['additional_interfaces'] is defined
+  with_items: "{{ vm_vars['additional_interfaces'] }}"

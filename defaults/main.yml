@@ -1,0 +1,14 @@
+---
+catalog:
+  s:
+    vm_vcpus: 2
+    vm_memory_mb: 8192
+  s+:
+    vm_vcpus: 2
+    vm_memory_mb: 32768
+  m:
+    vm_vcpus: 4
+    vm_memory_mb: 32768
+  l:
+    vm_vcpus: 8
+    vm_memory_mb: 65536

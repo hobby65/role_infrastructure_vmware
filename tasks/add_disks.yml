@@ -1,0 +1,37 @@
+---
+#
+# Iterate over all defined disks and add them to the disklist dictionary
+#
+# If we continue with the gdmpip240 example with the following disk definition:
+#
+# "disks": [
+#   {
+#     "size": 10,
+#     "vg": "apache"
+#   }
+# ]
+#
+# The resulting disklist variable will become (the additional disk is added as a new list item after the root disk)
+#
+# "disklist": {
+#   "gdmpip240.gan.prorail.nl": [
+#     {
+#       "datastore": "UA_MER3_PROD",
+#       "size_gb": 60,
+#       "autoselect_datastore": "True"
+#     },
+#     {
+#       "datastore": "UA_MER3_PROD",
+#       "size_gb": 10,
+#       "autoselect_datastore": "True"
+#     },
+#   ]
+# }
+#
+- name: Add additional disks to the list when defined
+  loop_control:
+    loop_var: single_disk
+  ansible.builtin.set_fact:
+    disklist: "{{ disklist | combine({inventory_hostname: disklist[inventory_hostname] + [{'autoselect_datastore': true, 'datastore': vm_vars['vmware']['datastore_filter'], 'size_gb': single_disk.size}]}) }}"
+  when: vm_vars['disks'] is defined
+  with_items: "{{ vm_vars['disks'] }}"

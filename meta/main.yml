@@ -1,0 +1,12 @@
+---
+# This file is required for the requirements.yaml mechanism to work
+galaxy_info:
+  role_name: infrastructure_vmware
+  namespace: wilcofolkers
+  description: This creates the VM
+  author: Wilco Folkers
+  license: BSD
+  min_ansible_version: '2.9'
+  platforms:
+    - name: EL
+      versions : [all]
