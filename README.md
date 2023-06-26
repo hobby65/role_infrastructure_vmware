@@ -56,32 +56,32 @@ A VMWare definition in the host variables, in example (the host variables will c
  "meta": {
   "platform": {
    "version": "1.0",
-   "name": "ICT platform"
+   "name": "<name>"
   }
  },
  "primary_interface": {
-  "ip": "10.95.6.4",
+  "ip": "192.168.6.4",
   "network": "frontend1"
  },
  "vmware": {
-  "datacenter": "DC_UA_MER3",
-  "datastore_filter": "UA_MER3_PROD",
-  "cluster": "CLU_UA_MER3",
-  "vm_folder": "Linux/PaaS-ICT/test",
+  "datacenter": "DC",
+  "datastore_filter": "DS1",
+  "cluster": "CL",
+  "vm_folder": "Linux",
   "networks": {
    "backend1": {
-    "vmware_name": "CIC_Int_GR (vlan430)",
+    "vmware_name": "<net_name>",
     "netmask": "255.255.255.0",
-    "network": "10.95.7.0"
+    "network": "192.168.7.0"
    },
    "frontend1": {
-    "vmware_name": "PROD_GR (vlan767)",
+    "vmware_name": "<net name>",
     "netmask": "255.255.255.0",
-    "gateway": "10.95.6.1",
-    "network": "10.95.6.0"
+    "gateway": "192.168.6.1",
+    "network": "192.168.6.0"
    }
   },
-  "source_template": "rhel74_template"
+  "source_template": "rhel8"
  },
  "size": "s",
  "location_name": "DEV",
@@ -92,19 +92,19 @@ A VMWare definition in the host variables, in example (the host variables will c
 
 ```
 The definition snippet above will result in:
-* A single virtual machine with 2 vCPU's and 8GB of memory in cluster CLU_UA_MER3 in datacenter DC_UA_MER3 as defined on vCenter server adcmvca04
-* A single network interface attached to the system, with IP and DNS configuration, mapped to network PROD_GR (vlan7670) in VMWare
+* A single virtual machine with 2 vCPU's and 8GB of memory in cluster CL in datacenter DC1 as defined on vCenter server 
+* A single network interface attached to the system, with IP and DNS configuration, mapped to network <net name> in VMWare
 * A single 60GB boot disk (default setting)
-* The virtual machine is cloned from template rhel74_template
-* The virtual machine will be placed in folder Linux/PaaS-ICT/test
+* The virtual machine is cloned from template rhel8
+* The virtual machine will be placed in folder Linux
 ###### Mandatory keys
 As stated, the definition above is a combination of a host specific definition and group definitions. The minimal host specific definition for the VMWare playbook to create a virtual machine is:
 ```
 "meta": {
   "platform": {
-     "name": "ICT platform besturing", --> Platform name
-     "version": "1.0", --> Platform version definition
-     "contact": "<email>" --> Contact person for this platform
+     "name": "<name>", --> machine name / usage
+     "version": "1.0", --> versioning
+     "contact": "<email>" --> Contact person for this machine
   }
 }
 
@@ -113,7 +113,7 @@ As stated, the definition above is a combination of a host specific definition a
   "hostname": "node4.domain", --> The hostname for the new/modified system, in FQDN
   "primary_interface": {
     "network": "frontend1", --> The VMWare network to use to attach the network interface to (provided by group variables)
-    "ip": "10.95.6.4" --> The IP address to be used for the primary interface
+    "ip": "192.168.6.4" --> The IP address to be used for the primary interface
   },
   "size": "s" --> The size of the instance (defined as catalog item)
 }
@@ -142,7 +142,7 @@ Additional network interfaces (list of dictionaries):
 "additional_interfaces": [
   {
     "network": "backend1", --> The VMWare network to use to attach this network interface to (provided by group variables)
-    "ip": "10.95.7.27" --> The IP address to be used on the interface
+    "ip": "192.168.7.27" --> The IP address to be used on the interface
   }
 ]
 ```
@@ -169,7 +169,7 @@ This role uses the following default variables:
 These are set in the infrastructure buildingblock, so they are no longer needed in the inventory.
 
 __Dependencies__
-This playbook is dependant on the following Ansible Galaxy roles:
+This playbook is dependent on the following Ansible Galaxy roles:
 
 - community.vmware
 
